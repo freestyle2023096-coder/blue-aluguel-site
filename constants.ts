@@ -4,30 +4,30 @@ import { Plan, PlanInterval, AppSettings } from './types';
 export const INITIAL_PLANS: Plan[] = [
   {
     id: 'plan-mensal',
-    name: 'Mensal',
+    name: 'Mensal Blue',
     price: 69.90,
     days: 30,
     interval: PlanInterval.MENSAL,
-    description: '30 dias de automação e gestão completa.',
+    description: 'Gestão completa para 30 dias de operação ininterrupta.',
     isActive: true
   },
   {
     id: 'plan-trimestral',
-    name: 'Trimestral',
-    price: 199.90,
+    name: 'Trimestral Pro',
+    price: 189.90,
     days: 90,
     interval: PlanInterval.TRIMESTRAL,
-    description: '90 dias de BLUE BOT. O mais vendido para grupos!',
+    description: 'Alta performance para 90 dias. O favorito dos grupos!',
     isActive: true,
     isPopular: true
   },
   {
     id: 'plan-anual',
-    name: 'Anual',
-    price: 750.00,
+    name: 'Anual Elite',
+    price: 690.00,
     days: 365,
     interval: PlanInterval.ANUAL,
-    description: '365 dias. O melhor custo-benefício para profissionais.',
+    description: '365 dias de autonomia total. Máxima economia.',
     isActive: true
   }
 ];
