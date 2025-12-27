@@ -1,0 +1,8 @@
+{
+  "name": "⏤͟͟͞͞ BLUE ALUGUEL ⛤⃗ 💙 | Site Oficial",
+  "description": "Plataforma profissional de aluguel de bots para WhatsApp com sistema de vendas automatizado, painel de revendedores e gestão avançada.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
