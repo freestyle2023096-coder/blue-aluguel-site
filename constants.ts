@@ -3,6 +3,15 @@ import { Plan, PlanInterval, AppSettings } from './types';
 
 export const INITIAL_PLANS: Plan[] = [
   {
+    id: 'plan-teste',
+    name: 'Teste Grátis',
+    price: 0.00,
+    days: 7,
+    interval: PlanInterval.TESTE,
+    description: 'Experimente todo o poder do Blue Bot sem custos.',
+    isActive: true
+  },
+  {
     id: 'plan-mensal',
     name: 'Mensal Blue',
     price: 69.90,
