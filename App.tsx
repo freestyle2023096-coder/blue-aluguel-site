@@ -2,43 +2,33 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   MessageCircle, 
-  Settings, 
-  Users, 
-  LayoutDashboard, 
   Plus, 
   Trash2, 
   CheckCircle,
   Send,
   User,
   ArrowRight,
-  Menu,
   X,
   Zap,
   Download,
   Moon,
   Sun,
   Copy,
-  Link as LinkIcon,
   Trophy,
   Crown,
   Instagram,
   ShieldCheck,
   UserPlus,
-  UserMinus,
-  Check,
-  Store,
-  Key,
-  Smartphone,
-  Server,
   Activity,
   MoreVertical,
-  ChevronDown,
-  Monitor,
+  Smartphone,
+  Server,
   Laptop,
-  Circle
+  Circle,
+  Key
 } from 'lucide-react';
-import { Plan, AppSettings, Lead, Message, PlanInterval, RankLevel, Reseller } from './types';
-import { INITIAL_PLANS, DEFAULT_SETTINGS, ROBOT_NAME } from './constants';
+import { Plan, AppSettings, Lead, Message, RankLevel, Reseller } from './types';
+import { INITIAL_PLANS, DEFAULT_SETTINGS } from './constants';
 import { generateBotResponse } from './services/geminiService';
 import { PlanCard } from './components/PlanCard';
 import { AdminLogin } from './components/AdminLogin';
@@ -68,12 +58,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   
-  // Form States
+  // Conversational Form State
+  const [chatStep, setChatStep] = useState(0); 
+  // steps: 0: idle, 1: name, 2: wa, 3: mode, 4: project, 5: link, 6: add bot/ok
+  const [tempLeadData, setTempLeadData] = useState({
+    name: '', whatsapp: '', city: '', neighborhood: '', projectName: '', groupLink: '', purpose: ''
+  });
+
   const [newReseller, setNewReseller] = useState({ name: '', whatsapp: '' });
+
   const [messages, setMessages] = useState<Message[]>([
     { 
       id: '1', 
-      text: `Opa! Sou o BLUE Bot Vendas. 💙\n\nAqui você pode escolher seu plano de aluguel. Como posso te ajudar hoje?`, 
+      text: `Opa! Sou o BLUE Bot Vendas. 💙\n\nAqui você pode escolher seu plano de aluguel de bot para WhatsApp.\n\nEscolha um plano na vitrine para começar o seu pedido!`, 
       sender: 'bot', 
       timestamp: new Date() 
     }
@@ -81,9 +78,7 @@ export default function App() {
   const [inputMessage, setInputMessage] = useState('');
   const [isBotTyping, setIsBotTyping] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
-  const [formData, setFormData] = useState({
-    name: '', whatsapp: '', city: '', neighborhood: '', projectName: '', purpose: 'Entretenimento', groupLink: ''
-  });
+  const [lastWAText, setLastWAText] = useState('');
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -104,7 +99,6 @@ export default function App() {
     }
   }, [messages, isBotTyping]);
 
-  // Ranking Logic
   const resellerRanks = useMemo(() => {
     const counts: Record<string, { count: number, name: string }> = {};
     counts[settings.ownerNumber] = { count: 0, name: settings.ownerName };
@@ -144,10 +138,6 @@ export default function App() {
 
   const addNewReseller = () => {
     if (!newReseller.name || !newReseller.whatsapp) return;
-    if (settings.authorizedResellers.length >= 10) {
-      alert("Limite de 10 revendedores atingido!");
-      return;
-    }
     const reseller: Reseller = {
       id: Date.now().toString(),
       name: newReseller.name,
@@ -158,13 +148,8 @@ export default function App() {
       ...prev,
       authorizedResellers: [...prev.authorizedResellers, reseller]
     }));
-    
-    // Zap notification logic
-    const welcomeText = `Opa! Você foi autorizado como revendedor oficial do ${settings.storeName} ⏤͟͟͞͞ 💙\nLink da Loja: ${window.location.origin}\nSua senha: ${settings.adminPin}`;
-    window.open(`https://api.whatsapp.com/send?phone=${reseller.whatsapp}&text=${encodeURIComponent(welcomeText)}`, '_blank');
-
-    setNewReseller({ name: '', whatsapp: '' });
     triggerSaveFeedback("Revendedor Adicionado!");
+    setNewReseller({ name: '', whatsapp: '' });
   };
 
   const removeReseller = (id: string) => {
@@ -179,41 +164,135 @@ export default function App() {
     if (!inputMessage.trim()) return;
     const userMsg: Message = { id: Date.now().toString(), text: inputMessage, sender: 'user', timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
+    const userInput = inputMessage;
     setInputMessage('');
+
+    // Check for owner bypass
+    const isOwner = userInput.toLowerCase().includes(settings.ownerName.toLowerCase()) || 
+                    userInput.toLowerCase().includes("eu sou o dono") ||
+                    userInput.toLowerCase().includes("sou pedro bots") ||
+                    userInput.toLowerCase().includes("meu criador");
+
+    if (chatStep > 0) {
+      if (isOwner && chatStep < 6) {
+        setIsBotTyping(true);
+        setTimeout(() => {
+          setIsBotTyping(false);
+          setMessages(prev => [...prev, { id: Date.now().toString(), text: "Opa, Pedro! Reconhecido. 👑 Ativação gratuita liberada pra você. Já vou pular pro final!", sender: 'bot', timestamp: new Date() }]);
+          finalizeOrderConversational({ ...tempLeadData, name: 'Pedro Bots' }, true);
+          setChatStep(0);
+        }, 1000);
+      } else {
+        handleChatFlow(userInput);
+      }
+    } else {
+      setIsBotTyping(true);
+      const response = await generateBotResponse(userInput, settings.storeName);
+      setIsBotTyping(false);
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: response, sender: 'bot', timestamp: new Date() }]);
+    }
+  };
+
+  const handleChatFlow = (input: string) => {
     setIsBotTyping(true);
-    const response = await generateBotResponse(inputMessage, settings.storeName);
-    setIsBotTyping(false);
-    setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: response, sender: 'bot', timestamp: new Date() }]);
+    setTimeout(() => {
+      setIsBotTyping(false);
+      switch (chatStep) {
+        case 1: 
+          setTempLeadData(prev => ({ ...prev, name: input }));
+          setMessages(prev => [...prev, { id: Date.now().toString(), text: "📱 Ótimo! Agora informe seu WHATSAPP com DDD (Ex: 5599981175724):", sender: 'bot', timestamp: new Date() }]);
+          setChatStep(2);
+          break;
+        case 2:
+          setTempLeadData(prev => ({ ...prev, whatsapp: input }));
+          setMessages(prev => [...prev, { id: Date.now().toString(), text: "🎯 Qual será o MODO DE USO do Bot? (Ex: Administração, Vendas, Jogos, etc):", sender: 'bot', timestamp: new Date() }]);
+          setChatStep(3);
+          break;
+        case 3:
+          setTempLeadData(prev => ({ ...prev, purpose: input }));
+          setMessages(prev => [...prev, { id: Date.now().toString(), text: "👥 Qual será o NOME DO GRUPO onde o bot será usado?", sender: 'bot', timestamp: new Date() }]);
+          setChatStep(4);
+          break;
+        case 4:
+          setTempLeadData(prev => ({ ...prev, projectName: input }));
+          setMessages(prev => [...prev, { id: Date.now().toString(), text: "🔗 Agora envie o LINK DO GRUPO (onde o bot será adicionado):", sender: 'bot', timestamp: new Date() }]);
+          setChatStep(5);
+          break;
+        case 5:
+          setTempLeadData(prev => ({ ...prev, groupLink: input }));
+          setMessages(prev => [...prev, { 
+            id: Date.now().toString(), 
+            text: `⚠️ IMPORTANTE:\n\nAdicione o número do Bot no grupo agora:\n👉 *+55 99 98117-5724*\n\nMe avise com um "OK" quando tiver adicionado!`, 
+            sender: 'bot', 
+            timestamp: new Date() 
+          }]);
+          setChatStep(6);
+          break;
+        case 6: // Finalize order
+          finalizeOrderConversational({ ...tempLeadData }, false);
+          setChatStep(0);
+          break;
+      }
+    }, 600);
+  };
+
+  const finalizeOrderConversational = (data: typeof tempLeadData, free: boolean) => {
+    if (!selectedPlan) return;
+    
+    const newLead: Lead = { 
+      id: Date.now().toString(), 
+      ...data, 
+      planId: selectedPlan.id, 
+      timestamp: new Date() 
+    };
+    setLeads(prev => [newLead, ...prev]);
+
+    // Formatação exata para o PV do dono
+    const waText = `🔔 *NOVO PEDIDO - BLUE ALUGUEL*\n\n📋 *Dados do Cliente:*\n👤 *Nome:* ${data.name}\n📱 *WhatsApp:* ${data.whatsapp}\n🎯 *Finalidade:* ${data.purpose}\n👥 *Grupo:* ${data.projectName}\n🔗 *Link:* ${data.groupLink}\n\n📦 *Plano:* ${selectedPlan.name} (${selectedPlan.days} dias)\n⚡ *Comando:* \`.addaluguel ${selectedPlan.days}\``;
+    setLastWAText(waText);
+
+    if (free) {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        text: `👑 *PEDIDO ELITE (DONO) ATIVADO!* ⏤͟͟͞͞ 💙\n\nComo você é o Pedro Bots, sua ativação é imediata e gratuita.\n\nEnviando comando no grupo: \`.addaluguel ${selectedPlan.days}\``,
+        sender: 'bot',
+        timestamp: new Date()
+      }]);
+      setTimeout(() => {
+        window.open(`https://api.whatsapp.com/send?phone=${settings.ownerNumber}&text=${encodeURIComponent(waText + "\n\n(ATIVADO GRÁTIS PELO DONO)")}`, '_blank');
+      }, 3000);
+      return;
+    }
+
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text: `✅ Pedido Gerado com Sucesso!\n\nValor: R$ ${selectedPlan.price.toFixed(2).replace('.', ',')}\n\nClique no botão abaixo para copiar a chave Pix e ser direcionado ao WhatsApp do Pedro Bots para enviar seu pedido.`,
+      sender: 'bot',
+      timestamp: new Date(),
+      type: 'pix'
+    }]);
+  };
+
+  const handleCheckoutAction = () => {
+    // Copy Pix key
+    navigator.clipboard.writeText(settings.pixKey);
+    triggerSaveFeedback("Chave Pix Copiada!");
+    
+    // Redirect to WhatsApp with order details
+    setTimeout(() => {
+      window.open(`https://api.whatsapp.com/send?phone=${settings.ownerNumber}&text=${encodeURIComponent(lastWAText)}`, '_blank');
+    }, 1000);
   };
 
   const handleSelectPlan = (plan: Plan) => {
     setSelectedPlan(plan);
     setActiveTab('chat');
+    setChatStep(1); 
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
-      text: `Excelente escolha! O plano ${plan.name} para ${plan.days} dias.\n\nPreencha os dados abaixo para gerar seu pedido e a chave de pagamento.`,
+      text: `Excelente escolha! O plano *${plan.name}* para ${plan.days} dias. ⏤͟͟͞͞ 💙\n\nPara gerar o seu pedido, responda as perguntas abaixo:\n\n👤 Qual seu NOME COMPLETO?`,
       sender: 'bot',
-      timestamp: new Date(),
-      type: 'form'
-    }]);
-  };
-
-  const handleSubmitDetails = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPlan) return;
-    
-    const newLead: Lead = { id: Date.now().toString(), ...formData, planId: selectedPlan.id, timestamp: new Date() };
-    setLeads(prev => [newLead, ...prev]);
-
-    // Format WA Message
-    const waText = `Opa! Novo Pedido Blue Aluguel ⏤͟͟͞͞ 💙\nPlano: ${selectedPlan.name}\nCliente: ${formData.name}\nWhatsApp: ${formData.whatsapp}\nCidade: ${formData.city}\nProjeto: ${formData.projectName}\nLink: ${formData.groupLink}`;
-    
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      text: `✅ Pedido Gerado com Sucesso!\n\nValor: R$ ${selectedPlan.price.toFixed(2).replace('.', ',')}\nComando de Ativação: .addaluguel ${selectedPlan.days}\n\nCopie a Chave de Pagamento abaixo e envie o comprovante para o Pedro Bots.`,
-      sender: 'bot',
-      timestamp: new Date(),
-      type: 'pix'
+      timestamp: new Date()
     }]);
   };
 
@@ -232,7 +311,6 @@ export default function App() {
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-[#050b18] text-white' : 'bg-slate-50 text-slate-900'} transition-colors duration-500`}>
-      {/* Background Glows */}
       {isDarkMode && (
         <>
           <div className="glow-effect w-[500px] h-[500px] bg-blue-600/10 top-[-10%] right-[-10%]"></div>
@@ -240,7 +318,6 @@ export default function App() {
         </>
       )}
 
-      {/* Admin Toggle (3 Dots - Somente visível para o dono via autenticação) */}
       <div className="fixed top-6 right-6 z-[100]">
         <button 
           onClick={() => setShowAdminMenu(!showAdminMenu)}
@@ -274,7 +351,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Save Feedback Toast */}
       {saveStatus && (
         <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-right-10">
           <div className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-2xl flex items-center gap-2">
@@ -283,7 +359,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Header / Logo */}
       <header className="pt-16 pb-12 px-6 text-center relative z-10">
         <div className="inline-flex items-center gap-3 px-6 py-3 bg-blue-600/10 border border-blue-500/20 rounded-full text-blue-500 text-[10px] font-black uppercase tracking-[0.4em] mb-10 animate-pulse">
            <Zap size={14} className="fill-blue-500" /> Sistema Ativo 24/7
@@ -292,14 +367,13 @@ export default function App() {
           {settings.storeName}
         </h1>
         <p className="mt-6 text-slate-400 font-bold uppercase text-[10px] tracking-[0.5em] max-w-2xl mx-auto leading-relaxed opacity-80">
-          A solução definitiva em aluguel de bots. Gestão profissional e segurança anti-ban.
+          Especialista em aluguel de bots para WhatsApp. Gestão avançada e segurança total.
         </p>
       </header>
 
-      {/* Main Tabs Navigation */}
       <div className="flex justify-center gap-3 mb-16 px-4 relative z-10">
         <button onClick={() => setActiveTab('home')} className={`px-10 py-5 rounded-[20px] font-black uppercase text-[10px] tracking-widest transition-all ${activeTab === 'home' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30 scale-105' : 'bg-white/5 hover:bg-white/10'}`}>
-          Site Oficial
+          Vitrine
         </button>
         <button onClick={() => setActiveTab('chat')} className={`px-10 py-5 rounded-[20px] font-black uppercase text-[10px] tracking-widest transition-all ${activeTab === 'chat' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30 scale-105' : 'bg-white/5 hover:bg-white/10'}`}>
           Loja & Vendas
@@ -311,11 +385,9 @@ export default function App() {
         )}
       </div>
 
-      {/* Content Area */}
       <main className="max-w-7xl mx-auto px-6 pb-24 relative z-10">
         {activeTab === 'home' && (
           <div className="space-y-32 animate-in fade-in duration-1000">
-            {/* Landing Features */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {[
                 { icon: <div className="flex gap-2"><Smartphone size={20}/><Laptop size={20}/></div>, title: "Android, iPhone & PC", desc: "Plataforma 100% responsiva e otimizada para todas as telas e dispositivos." },
@@ -332,10 +404,9 @@ export default function App() {
               ))}
             </div>
 
-            {/* Plans Grid */}
             <div id="planos" className="space-y-16">
                <div className="text-center">
-                  <h2 className="text-4xl md:text-6xl font-black italic uppercase tracking-tighter">Planos Disponíveis</h2>
+                  <h2 className="text-4xl md:text-6xl font-black italic uppercase tracking-tighter">Escolha o plano ideal</h2>
                   <p className="text-blue-500 font-black uppercase text-xs tracking-[0.4em] mt-4">Ativação Instantânea ⏤͟͟͞͞ 💙</p>
                </div>
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
@@ -345,7 +416,6 @@ export default function App() {
                </div>
             </div>
 
-            {/* Elite Ranking */}
             <div className="space-y-12 pb-12">
                <div className="flex items-center gap-6">
                   <div className="w-16 h-16 rounded-3xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center shadow-2xl shadow-yellow-900/10">
@@ -390,7 +460,7 @@ export default function App() {
                   <div className="flex gap-1">
                     {[1,2,3,4,5].map(i => <Circle key={i} size={6} className="fill-blue-400 text-blue-400" />)}
                   </div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.4em] opacity-80">Suporte & Vendas Blue Bot</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] opacity-80">Online Agora</p>
                 </div>
               </div>
             </div>
@@ -401,34 +471,17 @@ export default function App() {
                   <div className={`max-w-[88%] rounded-[40px] px-10 py-6 text-sm shadow-2xl ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : isDarkMode ? 'bg-[#1a2333] border border-white/5 rounded-tl-none' : 'bg-white rounded-tl-none border border-slate-100'}`}>
                     <p className="font-bold uppercase tracking-tight text-[11px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                     
-                    {msg.type === 'form' && (
-                      <form onSubmit={handleSubmitDetails} className="mt-8 space-y-5">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <input required placeholder="NOME COMPLETO *" className="w-full bg-black/20 border border-white/10 rounded-2xl px-6 py-5 text-[11px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 text-white" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                          <input required placeholder="WHATSAPP (DDD) *" className="w-full bg-black/20 border border-white/10 rounded-2xl px-6 py-5 text-[11px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 text-white" value={formData.whatsapp} onChange={e => setFormData({...formData, whatsapp: e.target.value})} />
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                           <input required placeholder="CIDADE / BAIRRO *" className="w-full bg-black/20 border border-white/10 rounded-2xl px-6 py-5 text-[11px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 text-white" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
-                           <input required placeholder="NOME DO PROJETO *" className="w-full bg-black/20 border border-white/10 rounded-2xl px-6 py-5 text-[11px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 text-white" value={formData.projectName} onChange={e => setFormData({...formData, projectName: e.target.value})} />
-                        </div>
-                        <input required placeholder="LINK DO GRUPO (PARA ADD BOT) *" className="w-full bg-black/20 border border-white/10 rounded-2xl px-6 py-5 text-[11px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 text-white" value={formData.groupLink} onChange={e => setFormData({...formData, groupLink: e.target.value})} />
-                        <button type="submit" className="w-full bg-white text-blue-900 font-black py-6 rounded-2xl uppercase tracking-[0.3em] text-[11px] hover:scale-105 transition-all shadow-2xl flex items-center justify-center gap-3">
-                          Gerar Chave de Pagamento <ArrowRight size={18} />
-                        </button>
-                      </form>
-                    )}
-
                     {msg.type === 'pix' && (
                       <div className="mt-8 space-y-6 text-center animate-in fade-in zoom-in duration-500">
-                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.4em] mb-2">Chave de Pagamento Oficinal 💰</p>
+                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.4em] mb-2">Chave de Pagamento Oficial 💰</p>
                         <div className="bg-black/40 p-8 rounded-[32px] border border-white/10 break-all font-mono text-[11px] text-blue-400 font-black shadow-inner">{settings.pixKey}</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                           <button onClick={() => { navigator.clipboard.writeText(settings.pixKey); triggerSaveFeedback("Chave Copiada!"); }} className="py-5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2">
-                             <Copy size={18} /> Copiar Chave
+                        <div className="flex flex-col gap-4">
+                           <button onClick={handleCheckoutAction} className="py-6 bg-blue-600 text-white rounded-[24px] font-black uppercase text-xs tracking-widest hover:bg-blue-700 transition-all flex items-center justify-center gap-3 shadow-2xl shadow-blue-600/30">
+                             <Copy size={20} /> COPIAR PIX & ENVIAR PEDIDO
                            </button>
-                           <a href={`https://api.whatsapp.com/send?phone=${settings.ownerNumber}&text=PAGO`} target="_blank" className="py-5 bg-green-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-green-700 transition-all flex items-center justify-center gap-2 shadow-xl shadow-green-900/20">
-                             <MessageCircle size={18} /> Enviar Comprovante
-                           </a>
+                           <p className="text-[10px] font-black uppercase tracking-widest text-blue-400 animate-pulse">
+                             enviar comprovante para sua comprar ser aprovada
+                           </p>
                         </div>
                       </div>
                     )}
@@ -448,7 +501,7 @@ export default function App() {
 
             <div className={`p-8 border-t ${isDarkMode ? 'border-white/5 bg-[#0d1526]' : 'bg-white border-slate-200'} flex gap-4`}>
               <input 
-                placeholder="DÚVIDAS? PERGUNTE AO ASSISTENTE BLUE..." 
+                placeholder={chatStep > 0 ? "Responda aqui..." : "DÚVIDAS? PERGUNTE AO ASSISTENTE BLUE..."}
                 className={`flex-1 px-8 py-6 rounded-2xl font-black text-[11px] uppercase outline-none shadow-inner transition-all ${isDarkMode ? 'bg-white/5 border border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border border-slate-200 focus:bg-white'}`}
                 value={inputMessage}
                 onChange={e => setInputMessage(e.target.value)}
@@ -466,17 +519,11 @@ export default function App() {
                   <h2 className="text-5xl font-black italic uppercase tracking-tighter">Painel Gestor Blue</h2>
                   <p className="text-blue-500 font-black uppercase text-xs tracking-[0.4em] mt-3">Controle Central de Operações ⏤͟͟͞͞ 💙</p>
                 </div>
-                <div className="flex gap-4">
-                   <button onClick={() => alert("Relatório de Vendas gerado com sucesso!")} className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center gap-3 shadow-2xl shadow-blue-600/30 hover:scale-105 transition-all">
-                     <Download size={18} /> Exportar Log de Ativações
-                   </button>
-                </div>
              </div>
 
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                {/* GLOBAL SETTINGS */}
                 <div className={`p-12 rounded-[56px] border ${isDarkMode ? 'bg-[#0d1526] border-white/5 shadow-2xl' : 'bg-white border-slate-200 shadow-xl'}`}>
-                   <h3 className="font-black flex items-center gap-4 uppercase mb-12 text-sm tracking-widest"><Crown size={28} className="text-blue-500" /> Perfil do Gestor & Site</h3>
+                   <h3 className="font-black flex items-center gap-4 uppercase mb-12 text-sm tracking-widest"><Crown size={28} className="text-blue-500" /> Perfil & Site</h3>
                    <div className="space-y-8">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <label className="block">
@@ -494,112 +541,40 @@ export default function App() {
                            <input className="w-full bg-black/30 border border-white/10 rounded-2xl px-6 py-5 font-mono font-black text-xs text-white" value={settings.ownerNumber} onChange={e => updateSettingsField('ownerNumber', e.target.value)} />
                         </label>
                         <label>
-                           <span className="text-[10px] font-black text-slate-500 uppercase block mb-3 tracking-widest">Senha ADM (4 Dígitos)</span>
-                           <input className="w-full bg-black/30 border border-white/10 rounded-2xl px-6 py-5 font-mono font-black text-xs text-white" maxLength={4} value={settings.adminPin} onChange={e => updateSettingsField('adminPin', e.target.value)} />
+                           <span className="text-[10px] font-black text-slate-500 uppercase block mb-3 tracking-widest">Senha ADM</span>
+                           <input className="w-full bg-black/30 border border-white/10 rounded-2xl px-6 py-5 font-mono font-black text-xs text-white" value={settings.adminPin} onChange={e => updateSettingsField('adminPin', e.target.value)} />
                         </label>
                       </div>
-                      <label className="block">
-                         <span className="text-[10px] font-black text-slate-500 uppercase block mb-3 tracking-widest">Chave de Pagamento (Pix)</span>
-                         <input className="w-full bg-black/30 border border-white/10 rounded-2xl px-6 py-5 font-mono font-black text-xs text-blue-400" value={settings.pixKey} onChange={e => updateSettingsField('pixKey', e.target.value)} />
-                      </label>
                    </div>
                 </div>
 
-                {/* RESELLERS */}
                 <div className={`p-12 rounded-[56px] border ${isDarkMode ? 'bg-[#0d1526] border-white/5 shadow-2xl' : 'bg-white border-slate-200 shadow-xl'}`}>
-                   <h3 className="font-black flex items-center gap-4 uppercase mb-12 text-sm tracking-widest"><UserPlus size={28} className="text-blue-500" /> Revendedores Autorizados ({settings.authorizedResellers.length}/10)</h3>
+                   <h3 className="font-black flex items-center gap-4 uppercase mb-12 text-sm tracking-widest"><UserPlus size={28} className="text-blue-500" /> Revendedores ({settings.authorizedResellers.length}/10)</h3>
                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-                      <input placeholder="NOME DO GESTOR" className="bg-black/30 border border-white/10 rounded-2xl px-6 py-4 font-black uppercase text-[10px] text-white" value={newReseller.name} onChange={e => setNewReseller({...newReseller, name: e.target.value})} />
-                      <input placeholder="WHATSAPP (DDD)" className="bg-black/30 border border-white/10 rounded-2xl px-6 py-4 font-black uppercase text-[10px] text-white" value={newReseller.whatsapp} onChange={e => setNewReseller({...newReseller, whatsapp: e.target.value})} />
-                      <button onClick={addNewReseller} className="bg-blue-600 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-blue-700 transition-all"><Plus size={20} /> Adicionar</button>
+                      <input placeholder="NOME" className="bg-black/30 border border-white/10 rounded-2xl px-6 py-4 font-black uppercase text-[10px] text-white" value={newReseller.name} onChange={e => setNewReseller({...newReseller, name: e.target.value})} />
+                      <input placeholder="WHATSAPP" className="bg-black/30 border border-white/10 rounded-2xl px-6 py-4 font-black uppercase text-[10px] text-white" value={newReseller.whatsapp} onChange={e => setNewReseller({...newReseller, whatsapp: e.target.value})} />
+                      <button onClick={addNewReseller} className="bg-blue-600 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2"><Plus size={20} /> Add</button>
                    </div>
-                   <div className="space-y-4 max-h-[380px] overflow-y-auto custom-scrollbar pr-2">
-                      {settings.authorizedResellers.map(res => {
-                         const rankData = resellerRanks.find(r => r.whatsapp === res.whatsapp);
-                         return (
-                          <div key={res.id} className="p-6 bg-black/30 rounded-[32px] border border-white/5 flex items-center justify-between hover:border-blue-500/30 transition-all">
-                             <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black border ${getRankColor(rankData?.rank || 'Bronze')}`}>
-                                  <User size={20} />
-                                </div>
-                                <div>
-                                   <p className="font-black uppercase text-xs tracking-tight text-white">{res.name}</p>
-                                   <div className="flex items-center gap-3 mt-1">
-                                      <span className="text-[9px] text-slate-500 font-mono font-bold">{res.whatsapp}</span>
-                                      <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md border ${getRankColor(rankData?.rank || 'Bronze')}`}>{rankData?.rank || 'Bronze'}</span>
-                                   </div>
-                                </div>
-                             </div>
-                             <div className="flex items-center gap-2">
-                                <div className="text-right mr-3">
-                                   <p className="text-[10px] font-black text-blue-500">{rankData?.sales || 0} Sales</p>
-                                </div>
-                                <button onClick={() => removeReseller(res.id)} className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
-                             </div>
-                          </div>
-                         )
-                      })}
-                      {settings.authorizedResellers.length === 0 && (
-                        <div className="py-16 text-center opacity-30 italic uppercase text-[10px] font-black tracking-widest">Nenhum revendedor cadastrado no momento.</div>
-                      )}
+                   <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                      {settings.authorizedResellers.map(res => (
+                        <div key={res.id} className="p-6 bg-black/30 rounded-[32px] border border-white/5 flex items-center justify-between">
+                           <div className="flex items-center gap-4">
+                              <User size={20} className="text-blue-500" />
+                              <div>
+                                 <p className="font-black uppercase text-xs text-white">{res.name}</p>
+                                 <p className="text-[9px] text-slate-500 font-mono">{res.whatsapp}</p>
+                              </div>
+                           </div>
+                           <button onClick={() => removeReseller(res.id)} className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
+                        </div>
+                      ))}
                    </div>
-                </div>
-             </div>
-
-             {/* STATS TABLE */}
-             <div className={`p-12 rounded-[56px] border ${isDarkMode ? 'bg-[#0d1526] border-white/5 shadow-2xl' : 'bg-white border-slate-200 shadow-xl'} overflow-hidden`}>
-                <div className="flex items-center justify-between mb-12">
-                   <h3 className="font-black flex items-center gap-4 uppercase text-sm tracking-widest"><Activity size={28} className="text-blue-500" /> Log de Ativações Blue ⏤͟͟͞͞ 💙</h3>
-                   <span className="bg-blue-600/10 text-blue-500 text-[10px] px-4 py-2 rounded-xl font-black uppercase tracking-widest border border-blue-500/20">{leads.length} Pedidos Totais</span>
-                </div>
-                <div className="overflow-x-auto custom-scrollbar">
-                   <table className="w-full text-left text-[10px] uppercase font-black">
-                      <thead>
-                        <tr className="border-b border-white/10 text-slate-500 bg-white/5">
-                          <th className="py-6 px-6">Identidade Blue</th>
-                          <th className="py-6 px-6">Projeto / Destino</th>
-                          <th className="py-6 px-6">Plano & Ativação</th>
-                          <th className="py-6 px-6">Registro Temporal</th>
-                        </tr>
-                      </thead>
-                      <tbody className={`divide-y divide-white/5 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {leads.length === 0 ? (
-                          <tr><td colSpan={4} className="py-24 text-center opacity-30 italic uppercase text-[10px] font-black tracking-widest">Aguardando as primeiras vendas da plataforma...</td></tr>
-                        ) : (
-                          leads.map(lead => {
-                            const plan = plans.find(p => p.id === lead.planId);
-                            return (
-                              <tr key={lead.id} className="hover:bg-white/5 transition-colors">
-                                <td className="py-6 px-6">
-                                  <p className="font-black uppercase text-xs text-white tracking-tight">{lead.name}</p>
-                                  <span className="font-mono text-slate-500 mt-1 block tracking-tighter">{lead.whatsapp}</span>
-                                </td>
-                                <td className="py-6 px-6 max-w-[200px]">
-                                   <p className="font-bold text-blue-400 truncate uppercase">{lead.projectName}</p>
-                                   <p className="text-[9px] text-slate-500 truncate mt-1 lowercase italic">{lead.groupLink}</p>
-                                </td>
-                                <td className="py-6 px-6">
-                                   <div className="flex flex-col gap-1.5">
-                                      <span className="bg-blue-600/20 text-blue-500 px-3 py-1.5 rounded-lg font-black uppercase tracking-tighter w-fit border border-blue-500/20">{plan?.name || 'CUSTOM'}</span>
-                                      <p className="text-[9px] font-black text-slate-500 italic">.addaluguel {plan?.days || 'X'}</p>
-                                   </div>
-                                </td>
-                                <td className="py-6 px-6 text-slate-500 font-mono text-[9px] font-black italic">
-                                  {lead.timestamp.toLocaleDateString()} {lead.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </td>
-                              </tr>
-                            )
-                          })
-                        )}
-                      </tbody>
-                   </table>
                 </div>
              </div>
           </div>
         )}
       </main>
 
-      {/* Footer / Instagram */}
       <footer className="py-16 px-6 border-t border-white/5 text-center relative z-10 bg-black/20">
         <div className="flex justify-center gap-10 mb-8">
            <a href="https://bit.ly/3YNgYFA" target="_blank" className="p-5 bg-white/5 hover:bg-white/10 hover:text-pink-500 rounded-3xl transition-all scale-110 shadow-2xl border border-white/5"><Instagram size={28} /></a>
@@ -607,11 +582,10 @@ export default function App() {
         </div>
         <div className="space-y-4">
            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-slate-500 opacity-60">Site Oficial ⏤͟͟͞͞ {settings.storeName.replace('⏤͟͟͞͞ ', '').replace(' ⛤⃗ 💙', '')} ⏤͟͟͞͞ © 2025</p>
-           <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Desenvolvido com excelência por {settings.ownerName} ⏤͟͟͞͞ 💙</p>
+           <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Desenvolvido por {settings.ownerName} ⏤͟͟͞͞ 💙</p>
         </div>
       </footer>
 
-      {/* Admin Login Modal */}
       {showAdminLogin && (
         <AdminLogin 
           correctPin={settings.adminPin}
